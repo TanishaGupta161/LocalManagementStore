@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Environment
+.env
+.env.local
+.env.development.local
+.env.production.local
+.env.test.local
+
+# Build
+build/
+dist/
+
+# Coverage
+coverage/
+
+# Logs
+logs/
+*.log
+
+# Cache
+.turbo/
+.cache/
+
+# TypeScript
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
