@@ -1,26 +1,66 @@
 using backend.Configuration;
+using backend.Repositories;
+using backend.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
+using MongoDB.Bson;
 using MongoDB.Driver;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
-
 
 // =========================
 // Add Services
 // =========================
 
-// Controllers
 builder.Services.AddControllers();
 
-// Swagger / OpenAPI
+// Swagger
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
 
-// Read MongoDB settings from appsettings.json
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "Local Shop Management API",
+        Version = "v1"
+    });
+
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Description = "Enter JWT Token.\n\nExample: Bearer eyJhbGciOiJIUzI1NiIs...",
+        Name = "Authorization",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT"
+    });
+
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
+
+// MongoDB
 builder.Services.Configure<MongoDbSettings>(
     builder.Configuration.GetSection("MongoDB"));
 
+builder.Services.Configure<JwtSettings>(
+    builder.Configuration.GetSection("Jwt"));
 
-// Register MongoClient
 builder.Services.AddSingleton<IMongoClient>(sp =>
 {
     var settings = builder.Configuration
@@ -30,53 +70,90 @@ builder.Services.AddSingleton<IMongoClient>(sp =>
     return new MongoClient(settings.ConnectionString);
 });
 
+// Dependency Injection
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddScoped<IShopRepository, ShopRepository>();
+builder.Services.AddScoped<IProductRepository, ProductRepository>();
+builder.Services.AddScoped<IPasswordService, PasswordService>();
+builder.Services.AddScoped<IJwtService, JwtService>();
+builder.Services.AddScoped<AdminSeeder>();
 
+// JWT Authentication
+
+var jwtSettings = builder.Configuration
+    .GetSection("Jwt")
+    .Get<JwtSettings>()!;
+
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+
+            ValidIssuer = jwtSettings.Issuer,
+            ValidAudience = jwtSettings.Audience,
+
+            IssuerSigningKey = new SymmetricSecurityKey(
+    Encoding.UTF8.GetBytes(jwtSettings.Key)),
+        };
+    });
+
+builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
-
-// =========================
-// Check MongoDB Connection
-// =========================
-
+// MongoDB Connection Check
 using (var scope = app.Services.CreateScope())
 {
     var client = scope.ServiceProvider.GetRequiredService<IMongoClient>();
 
+    var settings = scope.ServiceProvider
+        .GetRequiredService<IOptions<MongoDbSettings>>().Value;
+
     try
     {
-        var databases = client.ListDatabaseNames().ToList();
+        var database = client.GetDatabase(settings.DatabaseName);
 
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine("=======================================");
-        Console.WriteLine("✅ MongoDB Connected Successfully");
-        Console.WriteLine("=======================================");
-        Console.ResetColor();
+        await database.RunCommandAsync<BsonDocument>(
+            new BsonDocument("ping", 1));
+
+        Console.WriteLine("MongoDB Connected Successfully");
     }
     catch (Exception ex)
     {
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine("=======================================");
-        Console.WriteLine("❌ MongoDB Connection Failed");
         Console.WriteLine(ex.Message);
-        Console.WriteLine("=======================================");
-        Console.ResetColor();
     }
 }
 
+// Seed Admin
+using (var scope = app.Services.CreateScope())
+{
+    var adminSeeder =
+        scope.ServiceProvider.GetRequiredService<AdminSeeder>();
 
+    await adminSeeder.SeedAdminAsync();
+}
 
-// =========================
-// Configure Middleware
-// =========================
+// Middleware
 
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
-    app.UseSwaggerUI();
+
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Local Shop API V1");
+    });
 }
 
 app.UseHttpsRedirection();
+
+app.UseAuthentication();
 
 app.UseAuthorization();
 
