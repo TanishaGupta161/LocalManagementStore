@@ -23,10 +23,10 @@ public class ProductController : ControllerBase
         _shopRepository = shopRepository;
     }
 
+    // Add Product
     [HttpPost]
     public async Task<IActionResult> AddProduct([FromBody] CreateProductRequest request)
     {
-        // Logged in Shopkeeper Id
         var ownerId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
         if (string.IsNullOrEmpty(ownerId))
@@ -38,7 +38,6 @@ public class ProductController : ControllerBase
             });
         }
 
-        // Find shop of logged in shopkeeper
         var shop = await _shopRepository.GetByOwnerIdAsync(ownerId);
 
         if (shop == null)
@@ -57,10 +56,7 @@ public class ProductController : ControllerBase
             Price = request.Price,
             Stock = request.Stock,
             Category = request.Category,
-
-            // Automatically attach shop
             ShopId = shop.Id!,
-
             IsAvailable = true,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -76,6 +72,7 @@ public class ProductController : ControllerBase
         });
     }
 
+    // Get My Products
     [HttpGet("my-products")]
     public async Task<IActionResult> GetMyProducts()
     {
@@ -99,6 +96,135 @@ public class ProductController : ControllerBase
 
         var products = await _productRepository.GetByShopIdAsync(shop.Id!);
 
-        return Ok(products);
+        return Ok(new
+        {
+            Success = true,
+            Products = products
+        });
+    }
+
+    // Get Product By Id
+    [HttpGet("{id}")]
+    public async Task<IActionResult> GetProductById(string id)
+    {
+        var product = await _productRepository.GetByIdAsync(id);
+
+        if (product == null)
+        {
+            return NotFound(new
+            {
+                Success = false,
+                Message = "Product not found."
+            });
+        }
+
+        return Ok(new
+        {
+            Success = true,
+            Product = product
+        });
+    }
+
+    // Update Product
+    [HttpPut("{id}")]
+    public async Task<IActionResult> UpdateProduct(string id, [FromBody] UpdateProductRequest request)
+    {
+        var ownerId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (string.IsNullOrEmpty(ownerId))
+        {
+            return Unauthorized();
+        }
+
+        var shop = await _shopRepository.GetByOwnerIdAsync(ownerId);
+
+        if (shop == null)
+        {
+            return BadRequest(new
+            {
+                Success = false,
+                Message = "Shop not found."
+            });
+        }
+
+        var product = await _productRepository.GetByIdAsync(id);
+
+        if (product == null)
+        {
+            return NotFound(new
+            {
+                Success = false,
+                Message = "Product not found."
+            });
+        }
+
+        if (product.ShopId != shop.Id)
+        {
+            return Forbid();
+        }
+
+        product.Name = request.Name;
+        product.Description = request.Description;
+        product.Price = request.Price;
+        product.Stock = request.Stock;
+        product.Category = request.Category;
+        product.IsAvailable = request.IsAvailable;
+        product.UpdatedAt = DateTime.UtcNow;
+
+        await _productRepository.UpdateAsync(product);
+
+        return Ok(new
+        {
+            Success = true,
+            Message = "Product updated successfully.",
+            Product = product
+        });
+    }
+
+    // Delete Product
+    [HttpDelete("{id}")]
+    public async Task<IActionResult> DeleteProduct(string id)
+    {
+        var ownerId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (string.IsNullOrEmpty(ownerId))
+        {
+            return Unauthorized();
+        }
+
+        var shop = await _shopRepository.GetByOwnerIdAsync(ownerId);
+
+        if (shop == null)
+        {
+            return BadRequest(new
+            {
+                Success = false,
+                Message = "Shop not found."
+            });
+        }
+
+        var product = await _productRepository.GetByIdAsync(id);
+
+        if (product == null)
+        {
+            return NotFound(new
+            {
+                Success = false,
+                Message = "Product not found."
+            });
+        }
+
+        if (product.ShopId != shop.Id)
+        {
+            return Forbid();
+        }
+
+        await _productRepository.DeleteAsync(id);
+
+        return Ok(new
+        {
+            Success = true,
+            Message = "Product deleted successfully."
+        });
     }
 }

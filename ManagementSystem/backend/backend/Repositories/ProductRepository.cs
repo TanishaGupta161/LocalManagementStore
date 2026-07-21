@@ -42,4 +42,10 @@ public class ProductRepository : IProductRepository
     {
         await _products.DeleteOneAsync(x => x.Id == id);
     }
+    public async Task<List<Product>> GetProductsByIdsAsync(List<string> productIds)
+{
+    return await _products
+        .Find(x => productIds.Contains(x.Id!))
+        .ToListAsync();
+}
 }

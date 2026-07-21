@@ -66,4 +66,38 @@ public class ShopController : ControllerBase
             Shop = shop
         });
     }
+    [HttpGet]
+[AllowAnonymous]
+public async Task<IActionResult> GetAllShops()
+{
+    var shops = await _shopRepository.GetAllAsync();
+
+    return Ok(new
+    {
+        Success = true,
+        Count = shops.Count,
+        Shops = shops
+    });
+}
+[HttpGet("{id}")]
+[AllowAnonymous]
+public async Task<IActionResult> GetShopById(string id)
+{
+    var shop = await _shopRepository.GetByIdAsync(id);
+
+    if (shop == null)
+    {
+        return NotFound(new
+        {
+            Success = false,
+            Message = "Shop not found."
+        });
+    }
+
+    return Ok(new
+    {
+        Success = true,
+        Shop = shop
+    });
+}
 }
