@@ -59,10 +59,22 @@ public class OrderRepository : IOrderRepository
         return lastOrder.QueueNumber + 1;
     }
 
-    public async Task UpdateAsync(Order order)
+        public async Task<int> GetPendingCountAsync(string shopId)
     {
-        await _orders.ReplaceOneAsync(
-            x => x.Id == order.Id,
-            order);
+            // Count orders that are pending or preparing
+            var filter = Builders<Order>.Filter.And(
+                Builders<Order>.Filter.Eq(x => x.ShopId, shopId),
+                Builders<Order>.Filter.In(x => x.Status, new[] { OrderStatus.Pending, OrderStatus.Preparing })
+            );
+
+            var count = await _orders.CountDocumentsAsync(filter);
+            return (int)count;
+        }
+
+        public async Task UpdateAsync(Order order)
+        {
+            await _orders.ReplaceOneAsync(
+                x => x.Id == order.Id,
+                order);
+        }
     }
-}
