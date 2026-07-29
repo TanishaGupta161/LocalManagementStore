@@ -17,6 +17,10 @@ public class Shop
 
     public string OwnerId { get; set; } = string.Empty;
 
+    // Coordinates to enable distance calculations
+    public double Latitude { get; set; } = 0.0;
+    public double Longitude { get; set; } = 0.0;
+
     public bool IsOpen { get; set; } = true;
 
     public DateTime CreatedAt { get; set; }

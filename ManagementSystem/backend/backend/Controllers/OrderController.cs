@@ -123,6 +123,38 @@ public partial class OrderController : ControllerBase
         int queueNumber =
             await _orderRepository.GetNextQueueNumberAsync(request.ShopId);
 
+        // Calculate distance and ETA if customer & shop coordinates are available
+        double distanceKm = 0.0;
+        int estimatedReadyInMinutes = 0;
+        DateTime estimatedReadyAt = DateTime.UtcNow;
+
+        bool hasCustomerLocation = !(request.CustomerLatitude == 0.0 && request.CustomerLongitude == 0.0);
+        bool hasShopLocation = !(shop.Latitude == 0.0 && shop.Longitude == 0.0);
+
+        if (hasCustomerLocation && hasShopLocation)
+        {
+            distanceKm = CalculateDistanceKm(request.CustomerLatitude, request.CustomerLongitude, shop.Latitude, shop.Longitude);
+
+            // Simple estimation parameters (tweakable)
+            const int avgPrepMinutesPerOrder = 5; // average time shop takes per order
+            const double avgTravelSpeedKmh = 30.0; // assumed travel speed
+
+            // Number of orders currently pending/preparing
+            var pendingCount = await _orderRepository.GetPendingCountAsync(request.ShopId);
+
+            // Estimate prep time: orders ahead * avgPrep + this order's avg prep
+            estimatedReadyInMinutes = (int)Math.Ceiling((pendingCount + 1) * (double)avgPrepMinutesPerOrder);
+
+            // Travel time (minutes)
+            var travelTimeMinutes = (int)Math.Ceiling(distanceKm / avgTravelSpeedKmh * 60.0);
+
+            // Final ETA considered as max(prep time, travel time) added to now (customer may arrive later)
+            var etaMinutes = Math.Max(estimatedReadyInMinutes, travelTimeMinutes);
+
+            estimatedReadyAt = DateTime.UtcNow.AddMinutes(etaMinutes);
+            estimatedReadyInMinutes = etaMinutes;
+        }
+
         var order = new Order
         {
             CustomerId = customerId,
@@ -131,6 +163,9 @@ public partial class OrderController : ControllerBase
             TotalAmount = totalAmount,
             QueueNumber = queueNumber,
             Status = OrderStatus.Pending,
+            DistanceKm = Math.Round(distanceKm, 3),
+            EstimatedReadyAt = estimatedReadyAt,
+            EstimatedReadyInMinutes = estimatedReadyInMinutes,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -260,5 +295,22 @@ public async Task<IActionResult> UpdateOrderStatus(
         Message = "Order status updated successfully.",
         Order = order
     });
+}
+
+// Haversine formula to calculate distance between two coordinates (in kilometers)
+private static double CalculateDistanceKm(double lat1, double lon1, double lat2, double lon2)
+{
+    static double ToRadians(double deg) => deg * (Math.PI / 180.0);
+
+    var dLat = ToRadians(lat2 - lat1);
+    var dLon = ToRadians(lon2 - lon1);
+
+    var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+            Math.Cos(ToRadians(lat1)) * Math.Cos(ToRadians(lat2)) *
+            Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+
+    var c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+    const double earthRadiusKm = 6371.0;
+    return earthRadiusKm * c;
 }
 }
