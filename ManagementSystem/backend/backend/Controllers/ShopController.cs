@@ -52,10 +52,13 @@ public class ShopController : ControllerBase
             Address = request.Address,
             Category = request.Category,
             OwnerId = ownerId,
-            IsOpen = true,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
+                    // Set coordinates if provided
+                    Latitude = request.Latitude,
+                    Longitude = request.Longitude,
+                    IsOpen = true,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
 
         await _shopRepository.CreateAsync(shop);
 

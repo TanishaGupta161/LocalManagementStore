@@ -10,7 +10,7 @@ namespace backend.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-public partial class OrderController : ControllerBase
+public class OrderController : ControllerBase
 {
     private readonly IOrderRepository _orderRepository;
     private readonly IUserRepository _userRepository;
@@ -28,7 +28,8 @@ public partial class OrderController : ControllerBase
         _shopRepository = shopRepository;
         _productRepository = productRepository;
     }
-        [HttpPost]
+
+    [HttpPost]
     [Authorize(Roles = "Customer")]
     public async Task<IActionResult> PlaceOrder(CreateOrderRequest request)
     {
@@ -75,7 +76,6 @@ public partial class OrderController : ControllerBase
         }
 
         var orderItems = new List<OrderItem>();
-
         decimal totalAmount = 0;
 
         foreach (var item in request.Items)
@@ -120,8 +120,32 @@ public partial class OrderController : ControllerBase
             totalAmount += product.Price * item.Quantity;
         }
 
-        int queueNumber =
-            await _orderRepository.GetNextQueueNumberAsync(request.ShopId);
+        int queueNumber = await _orderRepository.GetNextQueueNumberAsync(request.ShopId);
+
+        double distanceKm = 0.0;
+        int estimatedReadyInMinutes = 0;
+        DateTime estimatedReadyAt = DateTime.UtcNow;
+
+        bool hasCustomerLocation = !(request.CustomerLatitude == 0.0 && request.CustomerLongitude == 0.0);
+        bool hasShopLocation = !(shop.Latitude == 0.0 && shop.Longitude == 0.0);
+
+        if (hasCustomerLocation && hasShopLocation)
+        {
+            distanceKm = CalculateDistanceKm(request.CustomerLatitude, request.CustomerLongitude, shop.Latitude, shop.Longitude);
+
+            const int avgPrepMinutesPerOrder = 5;
+            const double avgTravelSpeedKmh = 30.0;
+
+            var pendingCount = await _orderRepository.GetPendingCountAsync(request.ShopId);
+
+          estimatedReadyInMinutes = (int)Math.Ceiling((double)(pendingCount + 1) * avgPrepMinutesPerOrder);
+            var travelTimeMinutes = (int)Math.Ceiling(distanceKm / avgTravelSpeedKmh * 60.0);
+
+            var etaMinutes = Math.Max(estimatedReadyInMinutes, travelTimeMinutes);
+
+            estimatedReadyAt = DateTime.UtcNow.AddMinutes(etaMinutes);
+            estimatedReadyInMinutes = etaMinutes;
+        }
 
         var order = new Order
         {
@@ -131,6 +155,9 @@ public partial class OrderController : ControllerBase
             TotalAmount = totalAmount,
             QueueNumber = queueNumber,
             Status = OrderStatus.Pending,
+            DistanceKm = Math.Round(distanceKm, 3),
+            EstimatedReadyAt = estimatedReadyAt,
+            EstimatedReadyInMinutes = estimatedReadyInMinutes,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -145,120 +172,138 @@ public partial class OrderController : ControllerBase
             Order = order
         });
     }
+
     [HttpGet("my-orders")]
-[Authorize(Roles = "Customer")]
-public async Task<IActionResult> GetMyOrders()
-{
-    var customerId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
-    if (string.IsNullOrEmpty(customerId))
+    [Authorize(Roles = "Customer")]
+    public async Task<IActionResult> GetMyOrders()
     {
-        return Unauthorized(new
+        var customerId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (string.IsNullOrEmpty(customerId))
         {
-            Success = false,
-            Message = "Invalid token."
+            return Unauthorized(new
+            {
+                Success = false,
+                Message = "Invalid token."
+            });
+        }
+
+        var orders = await _orderRepository.GetByCustomerIdAsync(customerId);
+
+        return Ok(new
+        {
+            Success = true,
+            Count = orders.Count,
+            Orders = orders
         });
     }
 
-    var orders = await _orderRepository.GetByCustomerIdAsync(customerId);
-
-    return Ok(new
+    [HttpGet("shop-orders")]
+    [Authorize(Roles = "Shopkeeper")]
+    public async Task<IActionResult> GetShopOrders()
     {
-        Success = true,
-        Count = orders.Count,
-        Orders = orders
-    });
-}
-[HttpGet("shop-orders")]
-[Authorize(Roles = "Shopkeeper")]
-public async Task<IActionResult> GetShopOrders()
-{
-    var ownerId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var ownerId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
-    if (string.IsNullOrEmpty(ownerId))
-    {
-        return Unauthorized(new
+        if (string.IsNullOrEmpty(ownerId))
         {
-            Success = false,
-            Message = "Invalid token."
+            return Unauthorized(new
+            {
+                Success = false,
+                Message = "Invalid token."
+            });
+        }
+
+        var shop = await _shopRepository.GetByOwnerIdAsync(ownerId);
+
+        if (shop == null)
+        {
+            return BadRequest(new
+            {
+                Success = false,
+                Message = "Shop not found."
+            });
+        }
+
+        var orders = await _orderRepository.GetByShopIdAsync(shop.Id!);
+
+        return Ok(new
+        {
+            Success = true,
+            Count = orders.Count,
+            Orders = orders
         });
     }
 
-    var shop = await _shopRepository.GetByOwnerIdAsync(ownerId);
-
-    if (shop == null)
+    [HttpPut("{id}/status")]
+    [Authorize(Roles = "Shopkeeper")]
+    public async Task<IActionResult> UpdateOrderStatus(
+        string id,
+        [FromBody] UpdateOrderStatusRequest request)
     {
-        return BadRequest(new
+        var ownerId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (string.IsNullOrEmpty(ownerId))
         {
-            Success = false,
-            Message = "Shop not found."
+            return Unauthorized(new
+            {
+                Success = false,
+                Message = "Invalid token."
+            });
+        }
+
+        var shop = await _shopRepository.GetByOwnerIdAsync(ownerId);
+
+        if (shop == null)
+        {
+            return BadRequest(new
+            {
+                Success = false,
+                Message = "Shop not found."
+            });
+        }
+
+        var order = await _orderRepository.GetByIdAsync(id);
+
+        if (order == null)
+        {
+            return NotFound(new
+            {
+                Success = false,
+                Message = "Order not found."
+            });
+        }
+
+        if (order.ShopId != shop.Id)
+        {
+            return Forbid();
+        }
+
+        order.Status = request.Status;
+        order.UpdatedAt = DateTime.UtcNow;
+
+        await _orderRepository.UpdateAsync(order);
+
+        return Ok(new
+        {
+            Success = true,
+            Message = "Order status updated successfully.",
+            Order = order
         });
     }
 
-    var orders = await _orderRepository.GetByShopIdAsync(shop.Id!);
-
-    return Ok(new
+    private static double CalculateDistanceKm(double lat1, double lon1, double lat2, double lon2)
     {
-        Success = true,
-        Count = orders.Count,
-        Orders = orders
-    });
-}
-[HttpPut("{id}/status")]
-[Authorize(Roles = "Shopkeeper")]
-public async Task<IActionResult> UpdateOrderStatus(
-    string id,
-    [FromBody] UpdateOrderStatusRequest request)
-{
-    var ownerId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        static double ToRadians(double deg) => deg * (Math.PI / 180.0);
 
-    if (string.IsNullOrEmpty(ownerId))
-    {
-        return Unauthorized(new
-        {
-            Success = false,
-            Message = "Invalid token."
-        });
+        var dLat = ToRadians(lat2 - lat1);
+        var dLon = ToRadians(lon2 - lon1);
+
+        var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+                Math.Cos(ToRadians(lat1)) * Math.Cos(ToRadians(lat2)) *
+                Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+
+        var c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+        const double earthRadiusKm = 6371.0;
+        return earthRadiusKm * c;
     }
-
-    var shop = await _shopRepository.GetByOwnerIdAsync(ownerId);
-
-    if (shop == null)
-    {
-        return BadRequest(new
-        {
-            Success = false,
-            Message = "Shop not found."
-        });
-    }
-
-    var order = await _orderRepository.GetByIdAsync(id);
-
-    if (order == null)
-    {
-        return NotFound(new
-        {
-            Success = false,
-            Message = "Order not found."
-        });
-    }
-
-    // Security Check
-    if (order.ShopId != shop.Id)
-    {
-        return Forbid();
-    }
-
-    order.Status = request.Status;
-    order.UpdatedAt = DateTime.UtcNow;
-
-    await _orderRepository.UpdateAsync(order);
-
-    return Ok(new
-    {
-        Success = true,
-        Message = "Order status updated successfully.",
-        Order = order
-    });
-}
 }

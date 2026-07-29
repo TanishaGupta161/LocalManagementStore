@@ -14,5 +14,8 @@ public interface IOrderRepository
 
     Task<int> GetNextQueueNumberAsync(string shopId);
 
+    // Number of pending/preparing orders for a shop (used to estimate ETA)
+    Task<int> GetPendingCountAsync(string shopId);
+
     Task UpdateAsync(Order order);
 }

@@ -48,4 +48,8 @@ public class ProductRepository : IProductRepository
         .Find(x => productIds.Contains(x.Id!))
         .ToListAsync();
 }
+public async Task CreateManyAsync(List<Product> products)
+{
+    await _products.InsertManyAsync(products);
+}
 }

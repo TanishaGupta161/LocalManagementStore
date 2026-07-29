@@ -14,4 +14,5 @@ public interface IProductRepository
 
     Task DeleteAsync(string id);
     Task<List<Product>> GetProductsByIdsAsync(List<string> productIds);
+    Task CreateManyAsync(List<Product> products);
 }

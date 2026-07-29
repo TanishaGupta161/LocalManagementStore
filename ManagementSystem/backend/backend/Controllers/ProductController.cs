@@ -68,8 +68,9 @@ public class ProductController : ControllerBase
         {
             Success = true,
             Message = "Product added successfully.",
-            Product = product
-        });
+                    ShopName = shop.ShopName,
+                    Product = product
+                });
     }
 
     // Get My Products
@@ -99,8 +100,9 @@ public class ProductController : ControllerBase
         return Ok(new
         {
             Success = true,
-            Products = products
-        });
+                    ShopName = shop.ShopName,
+                    Products = products
+                });
     }
 
     // Get Product By Id
@@ -118,11 +120,14 @@ public class ProductController : ControllerBase
             });
         }
 
-        return Ok(new
-        {
-            Success = true,
-            Product = product
-        });
+        var shop = await _shopRepository.GetByIdAsync(product.ShopId);
+
+                return Ok(new
+                {
+                    Success = true,
+                    ShopName = shop?.ShopName,
+                    Product = product
+                });
     }
 
     // Update Product
@@ -177,8 +182,9 @@ public class ProductController : ControllerBase
         {
             Success = true,
             Message = "Product updated successfully.",
-            Product = product
-        });
+                    ShopName = shop.ShopName,
+                    Product = product
+                });
     }
 
     // Delete Product
