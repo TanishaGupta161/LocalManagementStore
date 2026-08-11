@@ -1,11 +1,6 @@
-import Image from "next/image";
+import LocalShopManagement from "@/Components/LocalShopManagement";
+
 
 export default function Home() {
-  return (
-  <>
-  <h1>
-    Hello
-  </h1>
-  </>
-  );
+  return <LocalShopManagement />;
 }
